@@ -2,7 +2,6 @@ import { Telegraf, Markup } from "telegraf";
 import ccxt from "ccxt";
 import mongoose from "mongoose";
 import http from "http";
-import { ProxyAgent } from "undici";
 
 // =====================================================================
 // 1. CONFIGURATION & BRANDING
@@ -76,7 +75,7 @@ async function executeTrade(telegramId, side, symbol, amountUSDT) {
 }
 
 // =====================================================================
-// 5. GEMINI AI (PROXY BYPASS + LIVE SEARCH)
+// 5. GEMINI AI (WITH RELIABLE PROXY & FALLBACK)
 // =====================================================================
 async function askGemini(prompt) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${GEMINI_API_KEY}`;
@@ -91,20 +90,29 @@ async function askGemini(prompt) {
   };
 
   try {
-    const proxyRes = await fetch("https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all");
-    const proxies = (await proxyRes.text()).split("\n").filter(p => p.trim() !== "");
-    if (proxies.length > 0) {
-      const randomProxy = proxies[Math.floor(Math.random() * proxies.length)];
-      fetchOptions.dispatcher = new ProxyAgent(`http://${randomProxy}`);
+    // Reliable Proxy Bypass
+    const proxyUrl = "https://corsproxy.io/?";
+    const proxiedUrl = proxyUrl + encodeURIComponent(url);
+    
+    const res = await fetch(proxiedUrl, fetchOptions);
+    const data = await res.json();
+    
+    if (data.error) throw new Error(data.error.message);
+    return data.candidates[0].content.parts[0].text;
+    
+  } catch (error) {
+    console.log("Proxy failed, trying direct connection...", error.message);
+    
+    // Direct Fallback
+    try {
+      const res = await fetch(url, fetchOptions);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error.message);
+      return data.candidates[0].content.parts[0].text;
+    } catch (directError) {
+      throw new Error(`Connection failed. Google may be blocking this IP. Please wait a minute and try again.`);
     }
-  } catch (e) {
-    console.log("Proxy fetch failed, attempting direct...");
   }
-
-  const res = await fetch(url, fetchOptions);
-  const data = await res.json();
-  if (data.error) throw new Error(data.error.message);
-  return data.candidates[0].content.parts[0].text;
 }
 
 // =====================================================================
@@ -126,7 +134,7 @@ async function animateScan(ctx, messageId) {
         { parse_mode: "HTML" }
       );
       step++;
-    } catch (e) {} // Ignore Telegram rate limits on edits
+    } catch (e) {} 
   }, 1000);
 
   return interval;
@@ -226,10 +234,7 @@ bot.action("m:balance", async (ctx) => {
 bot.action("m:signal", async (ctx) => {
   await ctx.answerCbQuery("Initializing...");
   
-  // Send initial message
   const msg = await ctx.reply(`⏳ <b>INITIALIZING SCAN...</b>`, { parse_mode: "HTML" });
-  
-  // Start animation
   const animationInterval = await animateScan(ctx, msg.message_id);
 
   try {
@@ -242,7 +247,7 @@ bot.action("m:signal", async (ctx) => {
     const res = await askGemini(prompt);
     const signal = JSON.parse(res.match(/\{[\s\S]*\}/)[0]);
     
-    clearInterval(animationInterval); // STOP Animation
+    clearInterval(animationInterval); 
     
     await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, undefined,
       `🎯 <b>AI TRADE SIGNAL</b>\n` +
@@ -255,7 +260,7 @@ bot.action("m:signal", async (ctx) => {
       { parse_mode: "HTML", ...backMenu() }
     );
   } catch (e) { 
-    clearInterval(animationInterval); // STOP Animation
+    clearInterval(animationInterval); 
     await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, undefined, `❌ <b>SCAN FAILED</b>\n${e.message}`, { parse_mode: "HTML", ...backMenu() });
   }
 });
@@ -292,7 +297,6 @@ bot.on("text", async (ctx) => {
       return ctx.reply(`✅ <b>TRADE EXECUTED</b>\nID: <code>${result.id}</code>`, { parse_mode: "HTML", ...backMenu() });
     }
     
-    // Convert markdown to HTML for Telegram
     let cleanRes = res.replace(/```(?:json|html)?/g, "").replace(/\*\*(.*?)\*\*/g, "<b>$1</b>").replace(/\*(.*?)\*/g, "<i>$1</i>");
     await ctx.reply(`🤖 <b>AI RESPONSE</b>\n━━━━━━━━━━━━━━━━━━━━\n${cleanRes}`, { parse_mode: "HTML", ...backMenu() });
   } catch (e) { 
