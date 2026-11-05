@@ -126,7 +126,8 @@ async function askGemini(prompt, imageBase64 = null, history = []) {
 
 async function aiAutoTrade(userId, chatId) {
   try {
-    const scanner = new ccxt.binance();
+    // CHANGED TO BYBIT TO AVOID US SERVER BLOCK
+    const scanner = new ccxt.bybit();
     const tickers = await scanner.fetchTickers();
     const topMovers = Object.values(tickers).filter(t => t.symbol.endsWith('/USDT')).sort((a, b) => Math.abs(b.percentage) - Math.abs(a.percentage)).slice(0, 5);
     const marketData = topMovers.map(t => `${t.symbol}: $${t.last} (${t.percentage}%)`).join("\n");
@@ -280,7 +281,8 @@ bot.action("m:signal", async (ctx) => {
   await safeEdit(ctx, `🔄 <b>Scanning live market and reading news...</b>\n<i>Please wait...</i>`);
   
   try {
-    const scanner = new ccxt.binance();
+    // CHANGED TO BYBIT TO AVOID US SERVER BLOCK
+    const scanner = new ccxt.bybit();
     const tickers = await scanner.fetchTickers();
     const topMovers = Object.values(tickers).filter(t => t.symbol.endsWith('/USDT')).sort((a, b) => Math.abs(b.percentage) - Math.abs(a.percentage)).slice(0, 5);
     const marketData = topMovers.map(t => `${t.symbol}: $${t.last} (${t.percentage}%)`).join("\n");
