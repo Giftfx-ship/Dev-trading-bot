@@ -6,7 +6,6 @@ import http from "http";
 // =====================================================================
 // 1. CONFIGURATION & STYLE
 // =====================================================================
-// Put your grok-api.com key in Render as GROK_API_KEY
 const GROK_API_KEY = process.env.GROK_API_KEY; 
 const MONGO_URI = process.env.MONGO_URI;
 const CHANNEL_ID = "@devxtechzone"; 
@@ -106,8 +105,8 @@ async function getBalance(telegramId) {
 // 6. GROK AI ENGINE
 // =====================================================================
 async function askGrok(prompt) {
-  // If the URL fails, check the documentation on the website you got the key from.
-  // It might be https://api.x.ai/v1/chat/completions if you bought an official key.
+  // If you are using grok-api.com, keep this URL. 
+  // If you are using the official x.ai API, change to https://api.x.ai/v1/chat/completions
   const url = `https://api.grok-api.com/v1/chat/completions`; 
   
   const res = await fetch(url, {
@@ -117,7 +116,7 @@ async function askGrok(prompt) {
       "Content-Type": "application/json"
     },
     body: JSON.stringify({
-      model: "grok-beta", // Check their docs, it might be "grok-1" or "grok-2"
+      model: "grok-beta", 
       messages: [{ role: "user", content: prompt }],
       temperature: 0.5
     })
@@ -132,7 +131,13 @@ async function aiAutoTrade(userId, chatId) {
   try {
     const scanner = new ccxt.kucoin();
     const tickers = await scanner.fetchTickers();
-    const topMovers = Object.values(tickers).filter(t => t.symbol.endsWith('/USDT')).sort((a, b) => Math.abs(b.percentage) - Math.abs(a.percentage)).slice(0, 5);
+    
+    // Clean, error-free filtering logic
+    const topMovers = Object.values(tickers)
+      .filter(t => t.symbol.endsWith('/USDT'))
+      .sort((a, b) => Math.abs(b.percentage) - Math.abs(a.percentage))
+      .slice(0, 5);
+      
     const marketData = topMovers.map(t => `${t.symbol}: $${t.last} (${t.percentage}%)`).join("\n");
     
     const prompt = `You are an elite crypto trader AI. Look at this live market data:\n${marketData}\n\nPick the BEST trade. Reply strictly in JSON format without markdown formatting: {"decision": "BUY" or "SELL" or "HOLD", "symbol": "SOL/USDT", "reason": "Brief reason"}`;
@@ -326,22 +331,21 @@ bot.action("m:balance", async (ctx) => {
 bot.action("m:signal", async (ctx) => {
   await ctx.answerCbQuery("Scanning...");
   
-  const loadingMsgs = [
-    "📡 Connecting to exchange...",
-    "📊 Fetching live top movers...",
-    "🧠 AI analyzing price action...",
-    "⚡ Calculating optimal entry..."
-  ];
-  
-  await safeEdit(ctx, `🔄 <b>SCANNING LIVE MARKET</b>\n━━━━━━━━━━━━━━━━━━━━\n<i>${loadingMsgs[0]}</i>`);
+  await safeEdit(ctx, `🔄 <b>SCANNING LIVE MARKET</b>\n━━━━━━━━━━━━━━━━━━━━\n<i>📡 Connecting to exchange...</i>`);
   
   try {
     const scanner = new ccxt.kucoin();
     const tickers = await scanner.fetchTickers();
-    const topMovers = Object.values(tickers).filter(t => t.symbol.ends${With('/USloadingDT')).sort((a, b)Ms => Math.abs(b.percentage) - Math.abs(ags.[percentage)).slice(20, 5);
-   ] const marketData = topM}</overs.map(t => `${t.symbol}: $${t.last} (${t.percentage}%)`).join("\n");
     
-    await safeEdit(ctx, `🔄 <b>SCANNING LIVE MARKET</b>\n━━━━━━━━━━━━━━━━━━━━\n<i>i>`);
+    // Clean, error-free filtering logic
+    const topMovers = Object.values(tickers)
+      .filter(t => t.symbol.endsWith('/USDT'))
+      .sort((a, b) => Math.abs(b.percentage) - Math.abs(a.percentage))
+      .slice(0, 5);
+      
+    const marketData = topMovers.map(t => `${t.symbol}: $${t.last} (${t.percentage}%)`).join("\n");
+    
+    await safeEdit(ctx, `🔄 <b>SCANNING LIVE MARKET</b>\n━━━━━━━━━━━━━━━━━━━━\n<i>🧠 AI analyzing price action...</i>`);
 
     const prompt = `You are an elite crypto trader AI. Look at this live market data:\n${marketData}\n\nPick the absolute BEST trade. Reply strictly in JSON format without markdown formatting: {"symbol": "SOL/USDT", "action": "BUY" or "SELL", "reason": "Brief reason"}`;
     const res = await askGrok(prompt);
@@ -435,7 +439,7 @@ bot.on("photo", async (ctx) => {
   await ctx.reply(
     `📸 <b>VISION MODULE OFFLINE</b>\n` +
     `━━━━━━━━━━━━━━━━━━━━\n` +
-    `Our current AI engine does not support image processing. To analyze charts, please use the Google Gemini version of this bot.`, { parse_mode: "HTML", ...backMenu() });
+    `Our current AI engine does not support image processing.`, { parse_mode: "HTML", ...backMenu() });
 });
 
 // =====================================================================
