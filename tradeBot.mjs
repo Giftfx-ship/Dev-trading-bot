@@ -6,7 +6,8 @@ import http from "http";
 // =====================================================================
 // 1. CONFIGURATION & STYLE
 // =====================================================================
-const GROQ_API_KEY = process.env.GROQ_API_KEY;
+// Put your grok-api.com key in Render as GROK_API_KEY
+const GROK_API_KEY = process.env.GROK_API_KEY; 
 const MONGO_URI = process.env.MONGO_URI;
 const CHANNEL_ID = "@devxtechzone"; 
 const MENU_IMAGE_URL = "https://files.catbox.moe/e7j97z.png"; 
@@ -14,7 +15,7 @@ const MENU_IMAGE_URL = "https://files.catbox.moe/e7j97z.png";
 const DEV_NAME = "Dev Gift";
 const DEV_HANDLE = "@Devgiftt"; 
 const BOT_NAME = "Dev Trading Bot";
-const BOT_VERSION = "4.0.0 (Premium Edition)";
+const BOT_VERSION = "4.1.0 (Grok Edition)";
 
 const bot = new Telegraf(process.env.TG_TOKEN);
 const userSessions = new Map();
@@ -102,21 +103,28 @@ async function getBalance(telegramId) {
 }
 
 // =====================================================================
-// 6. GROQ AI (Llama 3)
+// 6. GROK AI ENGINE
 // =====================================================================
-async function askGroq(prompt) {
-  const url = `https://api.groq.com/openai/v1/chat/completions`;
+async function askGrok(prompt) {
+  // If the URL fails, check the documentation on the website you got the key from.
+  // It might be https://api.x.ai/v1/chat/completions if you bought an official key.
+  const url = `https://api.grok-api.com/v1/chat/completions`; 
+  
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Authorization": `Bearer ${GROQ_API_KEY}`, "Content-Type": "application/json" },
+    headers: {
+      "Authorization": `Bearer ${GROK_API_KEY}`,
+      "Content-Type": "application/json"
+    },
     body: JSON.stringify({
-      model: "llama-3.3-70b-versatile", 
+      model: "grok-beta", // Check their docs, it might be "grok-1" or "grok-2"
       messages: [{ role: "user", content: prompt }],
       temperature: 0.5
     })
   });
+  
   const data = await res.json();
-  if (data.error) throw new Error(data.error.message);
+  if (data.error) throw new Error(data.error.message || "Grok API Error");
   return data.choices[0].message.content;
 }
 
@@ -128,7 +136,8 @@ async function aiAutoTrade(userId, chatId) {
     const marketData = topMovers.map(t => `${t.symbol}: $${t.last} (${t.percentage}%)`).join("\n");
     
     const prompt = `You are an elite crypto trader AI. Look at this live market data:\n${marketData}\n\nPick the BEST trade. Reply strictly in JSON format without markdown formatting: {"decision": "BUY" or "SELL" or "HOLD", "symbol": "SOL/USDT", "reason": "Brief reason"}`;
-    const res = await askGroq(prompt);
+    
+    const res = await askGrok(prompt);
     
     const jsonMatch = res.match(/\{.*\}/s);
     if (!jsonMatch) throw new Error("AI did not return valid JSON.");
@@ -258,7 +267,7 @@ bot.action("m:about", async (ctx) => {
     `👨‍💻 <b>DEVELOPER INFO</b>\n` +
     `━━━━━━━━━━━━━━━━━━━━\n` +
     `This bot was built by <b>${DEV_NAME}</b>.\n\n` +
-    `🚀 <b>Core Engine:</b> CCXT & Groq Llama 3\n` +
+    `🚀 <b>Core Engine:</b> CCXT & Grok AI\n` +
     `📦 <b>Version:</b> <code>${BOT_VERSION}</code>\n\n` +
     `🔗 <b>Contact Developer:</b> ${DEV_HANDLE}\n\n` +
     `<i>Powered by Dev Trading Systems.</i>`;
@@ -329,13 +338,13 @@ bot.action("m:signal", async (ctx) => {
   try {
     const scanner = new ccxt.kucoin();
     const tickers = await scanner.fetchTickers();
-    const topMovers = Object.values(tickers).filter(t => t.symbol.endsWith('/USDT')).sort((a, b) => Math.abs(b.percentage) - Math.abs(a.percentage)).slice(0, 5);
-    const marketData = topMovers.map(t => `${t.symbol}: $${t.last} (${t.percentage}%)`).join("\n");
+    const topMovers = Object.values(tickers).filter(t => t.symbol.ends${With('/USloadingDT')).sort((a, b)Ms => Math.abs(b.percentage) - Math.abs(ags.[percentage)).slice(20, 5);
+   ] const marketData = topM}</overs.map(t => `${t.symbol}: $${t.last} (${t.percentage}%)`).join("\n");
     
-    await safeEdit(ctx, `🔄 <b>SCANNING LIVE MARKET</b>\n━━━━━━━━━━━━━━━━━━━━\n<i>${loadingMsgs[2]}</i>`);
+    await safeEdit(ctx, `🔄 <b>SCANNING LIVE MARKET</b>\n━━━━━━━━━━━━━━━━━━━━\n<i>i>`);
 
     const prompt = `You are an elite crypto trader AI. Look at this live market data:\n${marketData}\n\nPick the absolute BEST trade. Reply strictly in JSON format without markdown formatting: {"symbol": "SOL/USDT", "action": "BUY" or "SELL", "reason": "Brief reason"}`;
-    const res = await askGroq(prompt);
+    const res = await askGrok(prompt);
     
     const jsonMatch = res.match(/\{.*\}/s);
     if (!jsonMatch) throw new Error("AI did not return valid JSON.");
@@ -393,7 +402,7 @@ bot.on("text", async (ctx) => {
 
   await ctx.sendChatAction("typing");
   try {
-    const res = await askGroq(`User says: "${text}". If they want to trade, reply JSON: {"isTrade": true, "action": "BUY" or "SELL", "symbol": "BTC/USDT", "amount": 10}. If not, reply normal text.`);
+    const res = await askGrok(`User says: "${text}". If they want to trade, reply JSON: {"isTrade": true, "action": "BUY" or "SELL", "symbol": "BTC/USDT", "amount": 10}. If not, reply normal text.`);
     
     if (res.includes('"isTrade": true')) {
       const intent = JSON.parse(res.match(/\{.*\}/s)[0]);
@@ -426,7 +435,7 @@ bot.on("photo", async (ctx) => {
   await ctx.reply(
     `📸 <b>VISION MODULE OFFLINE</b>\n` +
     `━━━━━━━━━━━━━━━━━━━━\n` +
-    `Our current AI engine (Groq Llama 3) does not support image processing. To analyze charts, please use the Google Gemini version of this bot.`, { parse_mode: "HTML", ...backMenu() });
+    `Our current AI engine does not support image processing. To analyze charts, please use the Google Gemini version of this bot.`, { parse_mode: "HTML", ...backMenu() });
 });
 
 // =====================================================================
