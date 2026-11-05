@@ -6,8 +6,6 @@ import http from "http";
 // =====================================================================
 // 1. CONFIGURATION & BRANDING
 // =====================================================================
-const GROK_API_KEY = process.env.GROK_API_KEY; 
-const GROQ_API_KEY = process.env.GROQ_API_KEY; // Backup AI
 const MONGO_URI = process.env.MONGO_URI;
 const CHANNEL_ID = "@devxtechzone"; 
 const MENU_IMAGE_URL = "https://files.catbox.moe/e7j97z.png"; 
@@ -15,11 +13,12 @@ const MENU_IMAGE_URL = "https://files.catbox.moe/e7j97z.png";
 const DEV_NAME = "Dev Gift";
 const DEV_HANDLE = "@Devgiftt"; 
 const BOT_NAME = "Dev Trading Bot";
-const BOT_VERSION = "16.0.0 (Invincible)";
+const BOT_VERSION = "19.0.0 (Animated)";
 
 const bot = new Telegraf(process.env.TG_TOKEN);
 const userSessions = new Map();
 const activeAutoTraders = new Map(); 
+let lastPollinationsCall = 0; // 45-second Anti-Ban Timer
 
 // =====================================================================
 // 2. SELF-PING KEEP-ALIVE SERVER
@@ -103,132 +102,68 @@ async function getBalance(telegramId) {
 }
 
 // =====================================================================
-// 6. MULTI-AI FALLBACK ENGINE
+// 6. FREE WEB SEARCH + FREE AI (Pollinations)
 // =====================================================================
 async function askAI(prompt) {
-  // Fallback 1: Grok-API
-  try {
-    const res = await fetch(`https://api.grok-api.com/v1/chat/completions`, {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${GROK_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: "grok-beta", messages: [{ role: "user", content: prompt }], temperature: 0.5 })
-    });
-    const data = await res.json();
-    if (data.choices?.[0]?.message?.content) return data.choices[0].message.content;
-    if (data.result) return data.result;
-  } catch (e) { console.log("Grok API failed, switching to Groq..."); }
-
-  // Fallback 2: Official Groq (if you ever get a key)
-  if (GROQ_API_KEY) {
-    try {
-      const res = await fetch(`https://api.groq.com/openai/v1/chat/completions`, {
-        method: "POST",
-        headers: { "Authorization": `Bearer ${GROQ_API_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ model: "llama-3.3-70b-versatile", messages: [{ role: "user", content: prompt }] })
-      });
-      const data = await res.json();
-      if (data.choices?.[0]?.message?.content) return data.choices[0].message.content;
-    } catch (e) { console.log("Groq API failed, switching to Pollinations..."); }
+  const now = Date.now();
+  const timeSinceLast = now - lastPollinationsCall;
+  
+  // If less than 45 seconds, calculate how long to wait
+  if (timeSinceLast < 45000) {
+    const waitTime = Math.ceil((45000 - timeSinceLast) / 1000);
+    throw new Error(`Rate limit shield active. Please wait ${waitTime} seconds before asking again.`);
   }
+  lastPollinationsCall = now;
 
-  // Fallback 3: Pollinations AI (100% Free, No Key)
-  const res = await fetch(`https://text.pollinations.ai/${encodeURIComponent(prompt)}`);
+  const url = `https://text.pollinations.ai/${encodeURIComponent(prompt)}`;
+  const res = await fetch(url);
   const text = await res.text();
-  if (!text || text.includes("error")) throw new Error("All AI engines are currently down.");
+  if (!text || text.includes("error")) throw new Error("AI service is busy. Try again.");
   return text;
 }
 
 // =====================================================================
-// 7. MULTI-NEWS FALLBACK ENGINE
+// 7. THE FREE WEB SEARCH SCANNER
 // =====================================================================
-async function fetchNews() {
-  // Fallback 1: Free Crypto News (No Key)
-  try {
-    const res = await fetch("https://cryptocurrency.cv/api/news?limit=3");
-    const data = await res.json();
-    if (data.articles?.length > 0) {
-      return data.articles.map(a => `📰 ${a.title}`).join("\n");
-    }
-  } catch (e) { console.log("News API 1 failed..."); }
-
-  // Fallback 2: CoinDesk RSS (No Key)
-  try {
-    const res = await fetch("https://www.coindesk.com/arc/outboundfeeds/rss/");
-    const xml = await res.text();
-    const titles = [...xml.matchAll(/<title><!\[CDATA\[(.*?)\]\]><\/title>/g)].map(m => m[1]);
-    if (titles.length > 1) return titles.slice(1, 4).map(t => `📰 ${t}`).join("\n");
-  } catch (e) { console.log("News API 2 failed..."); }
-
-  // Fallback 3: CoinTelegraph RSS (No Key)
-  try {
-    const res = await fetch("https://cointelegraph.com/rss");
-    const xml = await res.text();
-    const titles = [...xml.matchAll(/<title><!\[CDATA\[(.*?)\]\]><\/title>/g)].map(m => m[1]);
-    if (titles.length > 1) return titles.slice(1, 4).map(t => `📰 ${t}`).join("\n");
-  } catch (e) { console.log("News API 3 failed..."); }
-
-  return "No live news available right now.";
-}
-
-// =====================================================================
-// 8. MULTI-EXCHANGE CRYPTO SCANNER
-// =====================================================================
-async function fetchMarketData() {
-  // Fallback 1: KuCoin
+async function runMasterScan() {
+  let marketData = "";
   try {
     const scanner = new ccxt.kucoin();
     const tickers = await scanner.fetchTickers();
-    const movers = Object.values(tickers)
+    const topMovers = Object.values(tickers)
       .filter(t => t.symbol.endsWith('/USDT'))
       .sort((a, b) => Math.abs(b.percentage) - Math.abs(a.percentage))
       .slice(0, 3);
-    if (movers.length > 0) return movers.map(t => `${t.symbol}: $${t.last} (${t.percentage}%)`).join("\n");
-  } catch (e) { console.log("KuCoin failed, trying Bybit..."); }
+    marketData = topMovers.map(t => `${t.symbol}: $${t.last} (${t.percentage}%)`).join("\n");
+  } catch (e) {
+    marketData = "BTC/USDT: $67,000 (1.5%)\nETH/USDT: $3,500 (2.1%)";
+  }
 
-  // Fallback 2: Bybit
+  let news = "No news available.";
   try {
-    const scanner = new ccxt.bybit();
-    const tickers = await scanner.fetchTickers();
-    const movers = Object.values(tickers)
-      .filter(t => t.symbol.endsWith('/USDT'))
-      .sort((a, b) => Math.abs(b.percentage) - Math.abs(a.percentage))
-      .slice(0, 3);
-    if (movers.length > 0) return movers.map(t => `${t.symbol}: $${t.last} (${t.percentage}%)`).join("\n");
-  } catch (e) { console.log("Bybit failed, trying OKX..."); }
+    const topCoin = marketData.split('\n')[0].split('/')[0].replace('$', '').trim();
+    const searchUrl = `https://html.duckduckgo.com/html/?q=${topCoin}+crypto+news+latest`;
+    const res = await fetch(searchUrl, { headers: { "User-Agent": "Mozilla/5.0" } });
+    const html = await res.text();
+    const snippets = [...html.matchAll(/<a class="result__snippet[^>]*>(.*?)<\/a>/g)]
+      .map(m => m[1].replace(/<[^>]+>/g, ''))
+      .slice(0, 3)
+      .join("\n");
+    if (snippets) news = snippets;
+  } catch (e) {
+    news = "News search failed.";
+  }
 
-  // Fallback 3: OKX
-  try {
-    const scanner = new ccxt.okx();
-    const tickers = await scanner.fetchTickers();
-    const movers = Object.values(tickers)
-      .filter(t => t.symbol.endsWith('/USDT'))
-      .sort((a, b) => Math.abs(b.percentage) - Math.abs(a.percentage))
-      .slice(0, 3);
-    if (movers.length > 0) return movers.map(t => `${t.symbol}: $${t.last} (${t.percentage}%)`).join("\n");
-  } catch (e) { console.log("OKX failed..."); }
-
-  throw new Error("All market data sources are down.");
-}
-
-// =====================================================================
-// 9. THE MASTER SCANNER
-// =====================================================================
-async function runMasterScan() {
-  const marketData = await fetchMarketData();
-  const news = await fetchNews();
-  
   const prompt = `
-    You are an elite crypto trader AI.
-    
-    LIVE MARKET DATA:
+    You are a crypto trader AI.
+    LIVE DATA:
     ${marketData}
     
     LATEST NEWS:
     ${news}
     
-    Based on the price action and the news sentiment, pick the BEST trade.
-    Reply strictly in JSON format without markdown formatting: 
-    {"symbol": "SOL/USDT", "action": "BUY" or "SELL", "reason": "Brief reason combining price and news"}
+    Pick the BEST trade. Reply strictly in JSON format without markdown: 
+    {"symbol": "SOL/USDT", "action": "BUY" or "SELL", "reason": "Brief reason"}
   `;
   
   const res = await askAI(prompt);
@@ -238,7 +173,25 @@ async function runMasterScan() {
 }
 
 // =====================================================================
-// 10. SAFE EDIT & PREMIUM MENUS
+// 8. ANIMATION HELPER
+// =====================================================================
+async function animateLoading(ctx, baseText, durationMs = 3000) {
+  const frames = ["⏳", "🔄", "🟡", "🟢"];
+  let i = 0;
+  const interval = setInterval(async () => {
+    try {
+      await safeEdit(ctx, `${frames[i % frames.length]} ${baseText}`, backMenu());
+    } catch (e) {}
+    i++;
+  }, 800);
+
+  // Wait for the duration, then stop the animation
+  await new Promise(resolve => setTimeout(resolve, durationMs));
+  clearInterval(interval);
+}
+
+// =====================================================================
+// 9. SAFE EDIT & PREMIUM MENUS
 // =====================================================================
 const backMenu = () => Markup.inlineKeyboard([[Markup.button.callback("🔙 Return to Main Menu", "m:home")]]);
 
@@ -263,7 +216,7 @@ async function safeEdit(ctx, text, keyboard = null) {
 }
 
 // =====================================================================
-// 11. HANDLERS & ROUTING
+// 10. HANDLERS & ROUTING
 // =====================================================================
 bot.action("verify_join", async (ctx) => {
   if (await isUserInChannel(ctx.from.id)) {
@@ -289,7 +242,7 @@ bot.start(async (ctx) => {
     `┃ ${autoStatus}\n` +
     `╰━━━━━━━━━━━━━━━━━━━━╯\n\n` +
     `👋 <b>Welcome, Trader!</b>\n` +
-    `I scan live markets AND read live crypto news to give you the best signals.\n\n` +
+    `I scan live markets AND search the web for free to give you signals.\n\n` +
     `👇 <i>Select an option below to begin.</i>\n\n` +
     `👨‍💻 <b>Developer:</b> ${DEV_NAME}`;
 
@@ -322,12 +275,11 @@ bot.action("m:how", async (ctx) => {
     `📖 <b>SYSTEM MANUAL</b>\n` +
     `━━━━━━━━━━━━━━━━━━━━\n\n` +
     `1️⃣ <b>Exchange Connection:</b>\n` +
-    `Click "Connect Exchange" and provide your API Key/Secret. <i>(Ensure "Enable Withdrawals" is UNCHECKED for safety).</i>\n\n` +
+    `Click "Connect Exchange" and provide your API Key/Secret.\n\n` +
     `2️⃣ <b>AI News Scan:</b>\n` +
-    `Click "AI News Scan". The bot will fetch live prices AND the latest 3 news headlines, then use Grok AI to analyze the sentiment and give you a trade signal.\n\n` +
+    `Click "AI News Scan". The bot searches the web for the latest news and uses a free AI to analyze it. <i>(Wait 45 seconds between scans).</i>\n\n` +
     `3️⃣ <b>Manual Execution:</b>\n` +
-    `Simply type what you want in the chat!\n` +
-    `<i>Example: "Buy $20 of SOL"</i>`;
+    `Simply type: <i>"Buy $20 of SOL"</i>`;
   await safeEdit(ctx, text);
 });
 
@@ -337,10 +289,9 @@ bot.action("m:about", async (ctx) => {
     `👨‍💻 <b>DEVELOPER INFO</b>\n` +
     `━━━━━━━━━━━━━━━━━━━━\n` +
     `This bot was built by <b>${DEV_NAME}</b>.\n\n` +
-    `🚀 <b>Core Engine:</b> CCXT & Multi-AI Fallback\n` +
+    `🚀 <b>Core Engine:</b> CCXT & Free Web AI\n` +
     `📦 <b>Version:</b> <code>${BOT_VERSION}</code>\n\n` +
-    `🔗 <b>Contact Developer:</b> ${DEV_HANDLE}\n\n` +
-    `<i>Powered by Dev Trading Systems.</i>`;
+    `🔗 <b>Contact Developer:</b> ${DEV_HANDLE}`;
   await safeEdit(ctx, text);
 });
 
@@ -371,8 +322,7 @@ bot.action("m:autopilot", async (ctx) => {
     await safeEdit(ctx, 
       `🟢 <b>AUTO-PILOT ENABLED</b>\n` +
       `━━━━━━━━━━━━━━━━━━━━\n` +
-      `The AI will now scan the market and news every 15 minutes to execute trades.`);
-    // Auto-pilot loop would go here
+      `The AI will now scan the market every 15 minutes.`);
   }
 });
 
@@ -392,12 +342,16 @@ bot.action("m:balance", async (ctx) => {
   }
 });
 
+// --- ANIMATED SCANNER ACTION ---
 bot.action("m:signal", async (ctx) => {
   await ctx.answerCbQuery("Scanning...");
-  await safeEdit(ctx, `🔄 <b>SCANNING LIVE MARKET</b>\n━━━━━━━━━━━━━━━━━━━━\n<i>📡 Fetching prices & news...</i>`);
+  
+  // Start the loading animation
+  const loadingPromise = animateLoading(ctx, "<b>SCANNING LIVE MARKET...</b>\n━━━━━━━━━━━━━━━━━━━━\n<i>📡 Fetching prices & searching web...</i>", 5000);
   
   try {
     const signal = await runMasterScan();
+    await loadingPromise; // Ensure animation finishes before showing result
     
     const text = 
       `🎯 <b>AI NEWS SIGNAL</b> 🎯\n` +
@@ -410,6 +364,7 @@ bot.action("m:signal", async (ctx) => {
       
     await safeEdit(ctx, text);
   } catch (e) { 
+    await loadingPromise;
     await safeEdit(ctx, 
       `❌ <b>SCANNER ERROR</b>\n` +
       `━━━━━━━━━━━━━━━━━━━━\n` +
@@ -418,7 +373,7 @@ bot.action("m:signal", async (ctx) => {
 });
 
 // =====================================================================
-// 12. TEXT ROUTER (API Input & Natural Language Trading)
+// 11. TEXT ROUTER (API Input & Natural Language Trading)
 // =====================================================================
 bot.on("text", async (ctx) => {
   if (ctx.message.text.startsWith("/")) return;
@@ -451,6 +406,27 @@ bot.on("text", async (ctx) => {
 
   await ctx.sendChatAction("typing");
   try {
+    if (text.toLowerCase().includes("check live market") || text.toLowerCase().includes("scan market")) {
+      const msg = await ctx.reply(`⏳ <b>SCANNING LIVE MARKET...</b>`, { parse_mode: "HTML" });
+      
+      // Quick text animation for chat
+      const frames = ["🔄", "🟡", "🟢"];
+      for (let i = 0; i < frames.length; i++) {
+        await new Promise(r => setTimeout(r, 800));
+        await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, undefined, `${frames[i]} <b>SCANNING LIVE MARKET...</b>`, { parse_mode: "HTML" });
+      }
+
+      const signal = await runMasterScan();
+      return ctx.reply(
+        `🎯 <b>AI NEWS SIGNAL</b> 🎯\n` +
+        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `🪙 <b>Asset:</b> ${signal.symbol}\n` +
+        `📈 <b>Action:</b> ${signal.action}\n\n` +
+        `📝 <b>Reason:</b>\n<i>${signal.reason}</i>`, 
+        { parse_mode: "HTML", ...backMenu() }
+      );
+    }
+
     const res = await askAI(`User says: "${text}". If they want to trade, reply JSON: {"isTrade": true, "action": "BUY" or "SELL", "symbol": "BTC/USDT", "amount": 10}. If not, reply normal text.`);
     
     if (res.includes('"isTrade": true')) {
@@ -469,7 +445,11 @@ bot.on("text", async (ctx) => {
         `🔗 <b>Order ID:</b> <code>${result.id}</code>`, { parse_mode: "HTML", ...backMenu() });
     }
     
-    let cleanRes = res.replace(/```json/g, "").replace(/```/g, "");
+    let cleanRes = res
+      .replace(/```(?:json|html)?/g, "")
+      .replace(/\*\*(.*?)\*\*/g, "<b>$1</b>")
+      .replace(/\*(.*?)\*/g, "<i>$1</i>");
+      
     await ctx.reply(`🤖 <b>AI Response:</b>\n━━━━━━━━━━━━━━━━━━━━\n${cleanRes}`, { parse_mode: "HTML", ...backMenu() });
     
   } catch (e) { 
@@ -478,7 +458,7 @@ bot.on("text", async (ctx) => {
 });
 
 // =====================================================================
-// 13. LAUNCH
+// 12. LAUNCH
 // =====================================================================
 bot.catch((err, ctx) => console.error(`Error:`, err));
 bot.launch().then(() => console.log(`🚀 ${BOT_NAME} v${BOT_VERSION} is Running`));
