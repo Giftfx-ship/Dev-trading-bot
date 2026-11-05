@@ -1,38 +1,34 @@
 import { Telegraf, Markup } from "telegraf";
 import ccxt from "ccxt";
 import mongoose from "mongoose";
-import http from "http"; 
+import http from "http";
+import { ProxyAgent } from "undici";
 
 // =====================================================================
 // 1. CONFIGURATION & BRANDING
 // =====================================================================
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const MONGO_URI = process.env.MONGO_URI;
-const CHANNEL_ID = "@devxtechzone"; 
+const CHANNEL_ID = "@devxtechzone";
 const MENU_IMAGE_URL = "https://files.catbox.moe/e7j97z.png"; 
 
 const DEV_NAME = "Dev Gift";
-const DEV_HANDLE = "@Devgiftt"; 
-const BOT_NAME = "Dev Trading Bot";
-const BOT_VERSION = "19.0.0 (Animated)";
+const BOT_NAME = "Dev Trading Terminal";
 
 const bot = new Telegraf(process.env.TG_TOKEN);
 const userSessions = new Map();
-const activeAutoTraders = new Map(); 
-let lastPollinationsCall = 0; // 45-second Anti-Ban Timer
 
 // =====================================================================
-// 2. SELF-PING KEEP-ALIVE SERVER
+// 2. KEEP-ALIVE SERVER
 // =====================================================================
 const PORT = process.env.PORT || 8080;
 http.createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/plain" });
-  res.end("Bot is alive and trading!");
-}).listen(PORT, () => {
-  console.log(`🌐 Keep-Alive server running on port ${PORT}`);
-});
+  res.end("Terminal is alive.");
+}).listen(PORT, () => console.log(`🌐 Server running on port ${PORT}`));
 
 // =====================================================================
-// 3. FORCE JOIN MIDDLEWARE
+// 3. FORCE JOIN
 // =====================================================================
 async function isUserInChannel(userId) {
   try {
@@ -47,204 +43,139 @@ bot.use(async (ctx, next) => {
 
   const isInChannel = await isUserInChannel(ctx.from.id);
   if (!isInChannel) {
-    const joinMsg = 
-      `🚫 <b>ACCESS DENIED</b> 🚫\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n` +
-      `To use this premium AI trading bot, you must be a member of our official channel.\n\n` +
-      `👇 <i>Click the button below to join, then click Verify.</i>`;
-      
     const joinMenu = Markup.inlineKeyboard([
       [Markup.button.url("📢 Join Official Channel", `https://t.me/${CHANNEL_ID.replace('@', '')}`)],
-      [Markup.button.callback("✅ I Have Joined (Verify)", "verify_join")]
+      [Markup.button.callback("✅ Verify Access", "verify_join")]
     ]);
-    
-    if (ctx.callbackQuery) await ctx.answerCbQuery("You must join the channel first!", { show_alert: true });
-    else await ctx.reply(joinMsg, { parse_mode: "HTML", ...joinMenu });
+    if (ctx.callbackQuery) await ctx.answerCbQuery("Join the channel first!", { show_alert: true });
+    else await ctx.reply(`⛔ <b>ACCESS DENIED</b>\n━━━━━━━━━━━━━━━━━━━━\nYou must join the official channel to use this terminal.`, { parse_mode: "HTML", ...joinMenu });
     return;
   }
   return next();
 });
 
 // =====================================================================
-// 4. DATABASE SETUP (MongoDB)
+// 4. DATABASE & TRADING ENGINE
 // =====================================================================
-mongoose.connect(MONGO_URI).then(() => console.log("✅ Connected to MongoDB")).catch(err => console.error("❌ DB Error:", err));
+mongoose.connect(MONGO_URI).then(() => console.log("✅ MongoDB Connected")).catch(err => console.error("❌ DB Error:", err));
 
-const UserSchema = new mongoose.Schema({
+const User = mongoose.model("User", new mongoose.Schema({
   telegramId: { type: String, unique: true },
   exchangeName: String,
   apiKey: String,
   apiSecret: String,
-  autoTrade: { type: Boolean, default: false }
-});
-const User = mongoose.model("User", UserSchema);
-
-// =====================================================================
-// 5. TRADING ENGINE (CCXT)
-// =====================================================================
-async function getExchange(telegramId) {
-  const user = await User.findOne({ telegramId: String(telegramId) });
-  if (!user || !user.apiKey) throw new Error("⚠️ No exchange connected. Please connect your API keys first.");
-  return new ccxt[user.exchangeName]({ apiKey: user.apiKey, secret: user.apiSecret, enableRateLimit: true });
-}
+}));
 
 async function executeTrade(telegramId, side, symbol, amountUSDT) {
-  const exchange = await getExchange(telegramId);
+  const user = await User.findOne({ telegramId: String(telegramId) });
+  if (!user || !user.apiKey) throw new Error("No exchange connected.");
+  
+  const exchange = new ccxt[user.exchangeName]({ apiKey: user.apiKey, secret: user.apiSecret, enableRateLimit: true });
   const ticker = await exchange.fetchTicker(symbol);
-  const amountCoin = amountUSDT / ticker.last;
-  return await exchange.createOrder(symbol, 'market', side.toLowerCase(), amountCoin);
-}
-
-async function getBalance(telegramId) {
-  const exchange = await getExchange(telegramId);
-  const balance = await exchange.fetchBalance();
-  return balance.USDT ? balance.USDT.free.toFixed(2) : "0.00";
+  return await exchange.createOrder(symbol, 'market', side.toLowerCase(), amountUSDT / ticker.last);
 }
 
 // =====================================================================
-// 6. FREE WEB SEARCH + FREE AI (Pollinations)
+// 5. GEMINI AI (PROXY BYPASS + LIVE SEARCH)
 // =====================================================================
-async function askAI(prompt) {
-  const now = Date.now();
-  const timeSinceLast = now - lastPollinationsCall;
+async function askGemini(prompt) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${GEMINI_API_KEY}`;
   
-  // If less than 45 seconds, calculate how long to wait
-  if (timeSinceLast < 45000) {
-    const waitTime = Math.ceil((45000 - timeSinceLast) / 1000);
-    throw new Error(`Rate limit shield active. Please wait ${waitTime} seconds before asking again.`);
-  }
-  lastPollinationsCall = now;
+  let fetchOptions = {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      tools: [{ googleSearch: {} }]
+    })
+  };
 
-  const url = `https://text.pollinations.ai/${encodeURIComponent(prompt)}`;
-  const res = await fetch(url);
-  const text = await res.text();
-  if (!text || text.includes("error")) throw new Error("AI service is busy. Try again.");
-  return text;
-}
-
-// =====================================================================
-// 7. THE FREE WEB SEARCH SCANNER
-// =====================================================================
-async function runMasterScan() {
-  let marketData = "";
   try {
-    const scanner = new ccxt.kucoin();
-    const tickers = await scanner.fetchTickers();
-    const topMovers = Object.values(tickers)
-      .filter(t => t.symbol.endsWith('/USDT'))
-      .sort((a, b) => Math.abs(b.percentage) - Math.abs(a.percentage))
-      .slice(0, 3);
-    marketData = topMovers.map(t => `${t.symbol}: $${t.last} (${t.percentage}%)`).join("\n");
-  } catch (e) {
-    marketData = "BTC/USDT: $67,000 (1.5%)\nETH/USDT: $3,500 (2.1%)";
-  }
-
-  let news = "No news available.";
-  try {
-    const topCoin = marketData.split('\n')[0].split('/')[0].replace('$', '').trim();
-    const searchUrl = `https://html.duckduckgo.com/html/?q=${topCoin}+crypto+news+latest`;
-    const res = await fetch(searchUrl, { headers: { "User-Agent": "Mozilla/5.0" } });
-    const html = await res.text();
-    const snippets = [...html.matchAll(/<a class="result__snippet[^>]*>(.*?)<\/a>/g)]
-      .map(m => m[1].replace(/<[^>]+>/g, ''))
-      .slice(0, 3)
-      .join("\n");
-    if (snippets) news = snippets;
-  } catch (e) {
-    news = "News search failed.";
-  }
-
-  const prompt = `
-    You are a crypto trader AI.
-    LIVE DATA:
-    ${marketData}
-    
-    LATEST NEWS:
-    ${news}
-    
-    Pick the BEST trade. Reply strictly in JSON format without markdown: 
-    {"symbol": "SOL/USDT", "action": "BUY" or "SELL", "reason": "Brief reason"}
-  `;
-  
-  const res = await askAI(prompt);
-  const jsonMatch = res.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error("AI did not return valid JSON.");
-  return JSON.parse(jsonMatch[0]);
-}
-
-// =====================================================================
-// 8. ANIMATION HELPER
-// =====================================================================
-async function animateLoading(ctx, baseText, durationMs = 3000) {
-  const frames = ["⏳", "🔄", "🟡", "🟢"];
-  let i = 0;
-  const interval = setInterval(async () => {
-    try {
-      await safeEdit(ctx, `${frames[i % frames.length]} ${baseText}`, backMenu());
-    } catch (e) {}
-    i++;
-  }, 800);
-
-  // Wait for the duration, then stop the animation
-  await new Promise(resolve => setTimeout(resolve, durationMs));
-  clearInterval(interval);
-}
-
-// =====================================================================
-// 9. SAFE EDIT & PREMIUM MENUS
-// =====================================================================
-const backMenu = () => Markup.inlineKeyboard([[Markup.button.callback("🔙 Return to Main Menu", "m:home")]]);
-
-const mainMenu = () =>
-  Markup.inlineKeyboard([
-    [Markup.button.callback("🔌 Connect Exchange", "m:connect"), Markup.button.callback("💼 My Balance", "m:balance")],
-    [Markup.button.callback("🤖 Toggle Auto-Pilot", "m:autopilot"), Markup.button.callback("🧠 AI News Scan", "m:signal")],
-    [Markup.button.callback("📖 How to Use", "m:how"), Markup.button.callback("👨‍💻 Developer", "m:about")],
-  ]);
-
-async function safeEdit(ctx, text, keyboard = null) {
-  const options = { parse_mode: "HTML", ...(keyboard || backMenu()) };
-  try {
-    if (ctx.update.callback_query.message.photo) {
-      await ctx.editMessageCaption(text, options);
-    } else {
-      await ctx.editMessageText(text, options);
+    const proxyRes = await fetch("https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all");
+    const proxies = (await proxyRes.text()).split("\n").filter(p => p.trim() !== "");
+    if (proxies.length > 0) {
+      const randomProxy = proxies[Math.floor(Math.random() * proxies.length)];
+      fetchOptions.dispatcher = new ProxyAgent(`http://${randomProxy}`);
     }
   } catch (e) {
-    if (!e.message.includes("message is not modified")) console.error("Edit Error:", e.message);
+    console.log("Proxy fetch failed, attempting direct...");
+  }
+
+  const res = await fetch(url, fetchOptions);
+  const data = await res.json();
+  if (data.error) throw new Error(data.error.message);
+  return data.candidates[0].content.parts[0].text;
+}
+
+// =====================================================================
+// 6. REAL ANIMATION ENGINE
+// =====================================================================
+async function animateScan(ctx, messageId) {
+  const spinner = ["⏳", "🔄", "🟡", "🟢"];
+  const dots = ["⬛⬜⬜", "⬛⬛⬜", "⬛⬛⬛"];
+  let step = 0;
+
+  const interval = setInterval(async () => {
+    try {
+      await ctx.telegram.editMessageText(ctx.chat.id, messageId, undefined, 
+        `${spinner[step % 4]} <b>SCANNING LIVE MARKET</b>\n` +
+        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `📡 Fetching top gainers... ${dots[step % 3]}\n` +
+        `🧠 Searching web for news... ${dots[(step+1) % 3]}\n` +
+        `⚙️ Analyzing sentiment... ${dots[(step+2) % 3]}`, 
+        { parse_mode: "HTML" }
+      );
+      step++;
+    } catch (e) {} // Ignore Telegram rate limits on edits
+  }, 1000);
+
+  return interval;
+}
+
+// =====================================================================
+// 7. PREMIUM MENUS
+// =====================================================================
+const mainMenu = () => Markup.inlineKeyboard([
+  [Markup.button.callback("🔌 Connect Exchange", "m:connect"), Markup.button.callback("💼 My Balance", "m:balance")],
+  [Markup.button.callback("🧠 AI Market Scan", "m:signal")],
+]);
+
+const backMenu = () => Markup.inlineKeyboard([[Markup.button.callback("⬅️ Return to Terminal", "m:home")]]);
+
+async function safeEditCaption(ctx, text, keyboard) {
+  try {
+    await ctx.editMessageCaption(text, { parse_mode: "HTML", ...keyboard });
+  } catch (e) {
+    try { await ctx.editMessageText(text, { parse_mode: "HTML", ...keyboard }); } catch (err) {}
   }
 }
 
 // =====================================================================
-// 10. HANDLERS & ROUTING
+// 8. HANDLERS
 // =====================================================================
 bot.action("verify_join", async (ctx) => {
   if (await isUserInChannel(ctx.from.id)) {
-    await ctx.answerCbQuery("✅ Verified successfully!");
-    await safeEdit(ctx, 
-      `🎉 <b>ACCESS GRANTED</b>\n` +
+    await ctx.answerCbQuery("✅ Access Granted");
+    await safeEditCaption(ctx, 
+      `🟢 <b>ACCESS GRANTED</b>\n` +
       `━━━━━━━━━━━━━━━━━━━━\n` +
-      `Welcome to the elite trading terminal.`, mainMenu());
+      `Welcome to the Trading Terminal.`, mainMenu());
   } else {
-    await ctx.answerCbQuery("❌ You haven't joined yet!", { show_alert: true });
+    await ctx.answerCbQuery("❌ Join the channel first!", { show_alert: true });
   }
 });
 
 bot.start(async (ctx) => {
   const user = await User.findOne({ telegramId: String(ctx.from.id) });
-  const status = user && user.exchangeName ? `✅ <b>Connected:</b> <code>${user.exchangeName.toUpperCase()}</code>` : `⚠️ <b>Not Connected</b>`;
-  const autoStatus = user && user.autoTrade ? `🟢 <b>Auto-Pilot ACTIVE</b>` : `🔴 <b>Auto-Pilot OFF</b>`;
+  const status = user ? `🟢 <b>CONNECTED:</b> <code>${user.exchangeName.toUpperCase()}</code>` : `🔴 <b>NOT CONNECTED</b>`;
   
   const caption = 
     `╭━━━〔 <b>${BOT_NAME}</b> 〕━━━╮\n` +
-    `┃ 🚀 <b>Version:</b> ${BOT_VERSION}\n` +
-    `┃ ${status}\n` +
-    `┃ ${autoStatus}\n` +
+    `┃ 👨‍💻 <b>Developer:</b> ${DEV_NAME}\n` +
+    `┃ 📡 <b>Status:</b> ${status}\n` +
     `╰━━━━━━━━━━━━━━━━━━━━╯\n\n` +
-    `👋 <b>Welcome, Trader!</b>\n` +
-    `I scan live markets AND search the web for free to give you signals.\n\n` +
-    `👇 <i>Select an option below to begin.</i>\n\n` +
-    `👨‍💻 <b>Developer:</b> ${DEV_NAME}`;
+    `Welcome to the ultimate AI trading engine. I read live news and analyze market data to give you the best signals.\n\n` +
+    `👇 <i>Select an option below to begin.</i>`;
 
   await ctx.replyWithPhoto(MENU_IMAGE_URL, {
     caption: caption,
@@ -256,211 +187,119 @@ bot.start(async (ctx) => {
 bot.action("m:home", async (ctx) => { 
   await ctx.answerCbQuery(); 
   const user = await User.findOne({ telegramId: String(ctx.from.id) });
-  const status = user && user.exchangeName ? `✅ <b>Connected:</b> <code>${user.exchangeName.toUpperCase()}</code>` : `⚠️ <b>Not Connected</b>`;
-  const autoStatus = user && user.autoTrade ? `🟢 <b>Auto-Pilot ACTIVE</b>` : `🔴 <b>Auto-Pilot OFF</b>`;
+  const status = user ? `🟢 <b>CONNECTED:</b> <code>${user.exchangeName.toUpperCase()}</code>` : `🔴 <b>NOT CONNECTED</b>`;
   
-  const caption = 
-    `╭━━━〔 <b>Dashboard</b> 〕━━━╮\n` +
-    `┃ ${status}\n` +
-    `┃ ${autoStatus}\n` +
+  await safeEditCaption(ctx, 
+    `╭━━━〔 <b>DASHBOARD</b> 〕━━━╮\n` +
+    `┃ 📡 <b>Status:</b> ${status}\n` +
     `╰━━━━━━━━━━━━━━━━━━━━╯\n\n` +
-    `👇 <i>What would you like to do?</i>`;
-
-  await safeEdit(ctx, caption, mainMenu());
-});
-
-bot.action("m:how", async (ctx) => {
-  await ctx.answerCbQuery();
-  const text = 
-    `📖 <b>SYSTEM MANUAL</b>\n` +
-    `━━━━━━━━━━━━━━━━━━━━\n\n` +
-    `1️⃣ <b>Exchange Connection:</b>\n` +
-    `Click "Connect Exchange" and provide your API Key/Secret.\n\n` +
-    `2️⃣ <b>AI News Scan:</b>\n` +
-    `Click "AI News Scan". The bot searches the web for the latest news and uses a free AI to analyze it. <i>(Wait 45 seconds between scans).</i>\n\n` +
-    `3️⃣ <b>Manual Execution:</b>\n` +
-    `Simply type: <i>"Buy $20 of SOL"</i>`;
-  await safeEdit(ctx, text);
-});
-
-bot.action("m:about", async (ctx) => {
-  await ctx.answerCbQuery();
-  const text = 
-    `👨‍💻 <b>DEVELOPER INFO</b>\n` +
-    `━━━━━━━━━━━━━━━━━━━━\n` +
-    `This bot was built by <b>${DEV_NAME}</b>.\n\n` +
-    `🚀 <b>Core Engine:</b> CCXT & Free Web AI\n` +
-    `📦 <b>Version:</b> <code>${BOT_VERSION}</code>\n\n` +
-    `🔗 <b>Contact Developer:</b> ${DEV_HANDLE}`;
-  await safeEdit(ctx, text);
+    `👇 <i>Select an option:</i>`, mainMenu());
 });
 
 bot.action("m:connect", async (ctx) => {
   await ctx.answerCbQuery();
-  userSessions.set(ctx.from.id, { step: "awaiting_exchange" });
-  await safeEdit(ctx, 
+  userSessions.set(ctx.from.id, { step: "exchange" });
+  await safeEditCaption(ctx, 
     `🔌 <b>EXCHANGE CONNECTION</b>\n` +
     `━━━━━━━━━━━━━━━━━━━━\n` +
-    `Please type the name of your exchange.\n\n` +
-    `<i>Supported: binance, bybit, kucoin, okx</i>`);
-});
-
-bot.action("m:autopilot", async (ctx) => {
-  await ctx.answerCbQuery();
-  const user = await User.findOne({ telegramId: String(ctx.from.id) });
-  if (!user || !user.apiKey) return ctx.reply("⚠️ You must connect your API keys first!", backMenu());
-  
-  if (user.autoTrade) {
-    user.autoTrade = false; await user.save();
-    clearInterval(activeAutoTraders.get(ctx.from.id)); activeAutoTraders.delete(ctx.from.id);
-    await safeEdit(ctx, 
-      `🔴 <b>AUTO-PILOT DISABLED</b>\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n` +
-      `The AI will no longer trade automatically.`);
-  } else {
-    user.autoTrade = true; await user.save();
-    await safeEdit(ctx, 
-      `🟢 <b>AUTO-PILOT ENABLED</b>\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n` +
-      `The AI will now scan the market every 15 minutes.`);
-  }
+    `Type the name of your exchange:\n` +
+    `<i>(binance, bybit, kucoin, okx)</i>`, backMenu());
 });
 
 bot.action("m:balance", async (ctx) => {
-  await ctx.answerCbQuery("Fetching balance...");
-  try { 
-    const bal = await getBalance(ctx.from.id);
-    await safeEdit(ctx, 
+  await ctx.answerCbQuery("Fetching...");
+  try {
+    const user = await User.findOne({ telegramId: String(ctx.from.id) });
+    if (!user) throw new Error("No exchange connected.");
+    const exchange = new ccxt[user.exchangeName]({ apiKey: user.apiKey, secret: user.apiSecret });
+    const bal = await exchange.fetchBalance();
+    await safeEditCaption(ctx, 
       `💼 <b>ACCOUNT BALANCE</b>\n` +
       `━━━━━━━━━━━━━━━━━━━━\n` +
-      `💵 <b>Available:</b> $${bal} USDT`); 
+      `💵 <b>Available:</b> <code>$${bal.USDT?.free.toFixed(2) || "0.00"} USDT</code>`, backMenu());
   } catch (e) { 
-    await safeEdit(ctx, 
-      `❌ <b>ERROR</b>\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n` +
-      `<i>${e.message}</i>`); 
+    await safeEditCaption(ctx, `❌ <b>Error:</b> ${e.message}`, backMenu()); 
   }
 });
 
-// --- ANIMATED SCANNER ACTION ---
+// --- ANIMATED SCANNER ---
 bot.action("m:signal", async (ctx) => {
-  await ctx.answerCbQuery("Scanning...");
+  await ctx.answerCbQuery("Initializing...");
   
-  // Start the loading animation
-  const loadingPromise = animateLoading(ctx, "<b>SCANNING LIVE MARKET...</b>\n━━━━━━━━━━━━━━━━━━━━\n<i>📡 Fetching prices & searching web...</i>", 5000);
+  // Send initial message
+  const msg = await ctx.reply(`⏳ <b>INITIALIZING SCAN...</b>`, { parse_mode: "HTML" });
   
+  // Start animation
+  const animationInterval = await animateScan(ctx, msg.message_id);
+
   try {
-    const signal = await runMasterScan();
-    await loadingPromise; // Ensure animation finishes before showing result
+    const scanner = new ccxt.kucoin();
+    const tickers = await scanner.fetchTickers();
+    const topMovers = Object.values(tickers).filter(t => t.symbol.endsWith('/USDT')).sort((a, b) => Math.abs(b.percentage) - Math.abs(a.percentage)).slice(0, 3);
+    const marketData = topMovers.map(t => `${t.symbol}: $${t.last} (${t.percentage}%)`).join("\n");
     
-    const text = 
-      `🎯 <b>AI NEWS SIGNAL</b> 🎯\n` +
+    const prompt = `Live Data:\n${marketData}\n\nSearch the web for news on these coins. Pick the BEST trade. Reply strictly JSON: {"symbol": "SOL/USDT", "action": "BUY" or "SELL", "reason": "Brief reason"}`;
+    const res = await askGemini(prompt);
+    const signal = JSON.parse(res.match(/\{[\s\S]*\}/)[0]);
+    
+    clearInterval(animationInterval); // STOP Animation
+    
+    await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, undefined,
+      `🎯 <b>AI TRADE SIGNAL</b>\n` +
       `━━━━━━━━━━━━━━━━━━━━\n` +
-      `🪙 <b>Asset:</b> ${signal.symbol}\n` +
-      `📈 <b>Action:</b> ${signal.action}\n\n` +
-      `📝 <b>Reason:</b>\n<i>${signal.reason}</i>\n\n` +
-      `💡 <i>To execute this trade, reply:</i>\n` +
-      `<code>Buy $10 of ${signal.symbol.split('/')[0]}</code>`;
-      
-    await safeEdit(ctx, text);
+      `🪙 <b>Asset:</b> <code>${signal.symbol}</code>\n` +
+      `📈 <b>Action:</b> <code>${signal.action}</code>\n\n` +
+      `📝 <b>Analysis:</b>\n<i>${signal.reason}</i>\n\n` +
+      `👉 <i>To execute, type:</i>\n` +
+      `<code>Buy $10 of ${signal.symbol.split('/')[0]}</code>`, 
+      { parse_mode: "HTML", ...backMenu() }
+    );
   } catch (e) { 
-    await loadingPromise;
-    await safeEdit(ctx, 
-      `❌ <b>SCANNER ERROR</b>\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n` +
-      `<i>${e.message}</i>`); 
+    clearInterval(animationInterval); // STOP Animation
+    await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, undefined, `❌ <b>SCAN FAILED</b>\n${e.message}`, { parse_mode: "HTML", ...backMenu() });
   }
 });
 
 // =====================================================================
-// 11. TEXT ROUTER (API Input & Natural Language Trading)
+// 9. TEXT ROUTER
 // =====================================================================
 bot.on("text", async (ctx) => {
   if (ctx.message.text.startsWith("/")) return;
   const userId = ctx.from.id, text = ctx.message.text.trim();
   let session = userSessions.get(userId) || {};
 
-  if (session.step === "awaiting_exchange") {
-    session.exchangeName = text.toLowerCase(); session.step = "awaiting_api"; userSessions.set(userId, session);
-    return ctx.reply(
-      `✅ <b>Exchange Set:</b> ${session.exchangeName.toUpperCase()}\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n` +
-      `Please paste your <b>API Key</b>:`, { parse_mode: "HTML", ...backMenu() });
+  if (session.step === "exchange") {
+    session.exchangeName = text.toLowerCase(); session.step = "api"; userSessions.set(userId, session);
+    return ctx.reply(`🔑 Paste your <b>API Key</b>:`, { parse_mode: "HTML", ...backMenu() });
   }
-  if (session.step === "awaiting_api") {
-    session.apiKey = text; session.step = "awaiting_secret"; userSessions.set(userId, session);
-    return ctx.reply(
-      `✅ <b>API Key Saved.</b>\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n` +
-      `Please paste your <b>API Secret</b>:`, { parse_mode: "HTML", ...backMenu() });
+  if (session.step === "api") {
+    session.apiKey = text; session.step = "secret"; userSessions.set(userId, session);
+    return ctx.reply(`🔑 Paste your <b>API Secret</b>:`, { parse_mode: "HTML", ...backMenu() });
   }
-  if (session.step === "awaiting_secret") {
+  if (session.step === "secret") {
     session.apiSecret = text;
     await User.findOneAndUpdate({ telegramId: String(userId) }, { telegramId: String(userId), exchangeName: session.exchangeName, apiKey: session.apiKey, apiSecret: session.apiSecret }, { upsert: true });
     userSessions.delete(userId);
-    return ctx.reply(
-      `🎉 <b>CONNECTION SUCCESSFUL</b>\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n` +
-      `Your ${session.exchangeName.toUpperCase()} account is now linked.`, { parse_mode: "HTML", ...mainMenu() });
+    return ctx.reply(`✅ <b>EXCHANGE CONNECTED SUCCESSFULLY</b>`, { parse_mode: "HTML", ...mainMenu() });
   }
 
   await ctx.sendChatAction("typing");
   try {
-    if (text.toLowerCase().includes("check live market") || text.toLowerCase().includes("scan market")) {
-      const msg = await ctx.reply(`⏳ <b>SCANNING LIVE MARKET...</b>`, { parse_mode: "HTML" });
-      
-      // Quick text animation for chat
-      const frames = ["🔄", "🟡", "🟢"];
-      for (let i = 0; i < frames.length; i++) {
-        await new Promise(r => setTimeout(r, 800));
-        await ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, undefined, `${frames[i]} <b>SCANNING LIVE MARKET...</b>`, { parse_mode: "HTML" });
-      }
-
-      const signal = await runMasterScan();
-      return ctx.reply(
-        `🎯 <b>AI NEWS SIGNAL</b> 🎯\n` +
-        `━━━━━━━━━━━━━━━━━━━━\n` +
-        `🪙 <b>Asset:</b> ${signal.symbol}\n` +
-        `📈 <b>Action:</b> ${signal.action}\n\n` +
-        `📝 <b>Reason:</b>\n<i>${signal.reason}</i>`, 
-        { parse_mode: "HTML", ...backMenu() }
-      );
-    }
-
-    const res = await askAI(`User says: "${text}". If they want to trade, reply JSON: {"isTrade": true, "action": "BUY" or "SELL", "symbol": "BTC/USDT", "amount": 10}. If not, reply normal text.`);
-    
+    const res = await askGemini(`User says: "${text}". If they want to trade, reply JSON: {"isTrade": true, "action": "BUY" or "SELL", "symbol": "BTC/USDT", "amount": 10}. If not, reply normal text.`);
     if (res.includes('"isTrade": true')) {
       const intent = JSON.parse(res.match(/\{[\s\S]*\}/)[0]);
-      await ctx.reply(
-        `⏳ <b>EXECUTING TRADE</b>\n` +
-        `━━━━━━━━━━━━━━━━━━━━\n` +
-        `📈 <b>Action:</b> ${intent.action}\n` +
-        `🪙 <b>Asset:</b> ${intent.symbol}\n` +
-        `💵 <b>Amount:</b> $${intent.amount}`, { parse_mode: "HTML" });
-        
       const result = await executeTrade(userId, intent.action, intent.symbol, intent.amount);
-      return ctx.reply(
-        `✅ <b>TRADE EXECUTED</b>\n` +
-        `━━━━━━━━━━━━━━━━━━━━\n` +
-        `🔗 <b>Order ID:</b> <code>${result.id}</code>`, { parse_mode: "HTML", ...backMenu() });
+      return ctx.reply(`✅ <b>TRADE EXECUTED</b>\nID: <code>${result.id}</code>`, { parse_mode: "HTML", ...backMenu() });
     }
     
-    let cleanRes = res
-      .replace(/```(?:json|html)?/g, "")
-      .replace(/\*\*(.*?)\*\*/g, "<b>$1</b>")
-      .replace(/\*(.*?)\*/g, "<i>$1</i>");
-      
-    await ctx.reply(`🤖 <b>AI Response:</b>\n━━━━━━━━━━━━━━━━━━━━\n${cleanRes}`, { parse_mode: "HTML", ...backMenu() });
-    
+    // Convert markdown to HTML for Telegram
+    let cleanRes = res.replace(/```(?:json|html)?/g, "").replace(/\*\*(.*?)\*\*/g, "<b>$1</b>").replace(/\*(.*?)\*/g, "<i>$1</i>");
+    await ctx.reply(`🤖 <b>AI RESPONSE</b>\n━━━━━━━━━━━━━━━━━━━━\n${cleanRes}`, { parse_mode: "HTML", ...backMenu() });
   } catch (e) { 
     await ctx.reply(`❌ <b>Error:</b> ${e.message}`, { parse_mode: "HTML", ...backMenu() }); 
   }
 });
 
-// =====================================================================
-// 12. LAUNCH
-// =====================================================================
-bot.catch((err, ctx) => console.error(`Error:`, err));
-bot.launch().then(() => console.log(`🚀 ${BOT_NAME} v${BOT_VERSION} is Running`));
+bot.launch().then(() => console.log("🚀 Terminal Running"));
 process.once("SIGINT", () => bot.stop("SIGINT"));
 process.once("SIGTERM", () => bot.stop("SIGTERM"));
