@@ -1,0 +1,17 @@
+{
+  "name": "ultimate-autonomous-trader",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "tradeBot.mjs",
+  "scripts": {
+    "start": "node tradeBot.mjs"
+  },
+  "dependencies": {
+    "ccxt": "^4.2.15",
+    "mongoose": "^8.1.1",
+    "telegraf": "^4.16.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
