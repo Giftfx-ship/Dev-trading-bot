@@ -10,10 +10,8 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const MONGO_URI = process.env.MONGO_URI;
 const CHANNEL_ID = "@devxtechzone"; 
 
-// --- YOUR CUSTOM MENU IMAGE ---
 const MENU_IMAGE_URL = "https://files.catbox.moe/e7j97z.png"; 
 
-// --- YOUR CREDITS ---
 const DEV_NAME = "Dev Gift";
 const DEV_HANDLE = "@Devgiftt"; 
 const BOT_NAME = "Dev Trading Bot";
@@ -126,8 +124,8 @@ async function askGemini(prompt, imageBase64 = null, history = []) {
 
 async function aiAutoTrade(userId, chatId) {
   try {
-    // CHANGED TO BYBIT TO AVOID US SERVER BLOCK
-    const scanner = new ccxt.bybit();
+    // CHANGED TO KUCOIN
+    const scanner = new ccxt.kucoin();
     const tickers = await scanner.fetchTickers();
     const topMovers = Object.values(tickers).filter(t => t.symbol.endsWith('/USDT')).sort((a, b) => Math.abs(b.percentage) - Math.abs(a.percentage)).slice(0, 5);
     const marketData = topMovers.map(t => `${t.symbol}: $${t.last} (${t.percentage}%)`).join("\n");
@@ -158,7 +156,6 @@ const mainMenu = () =>
     [Markup.button.callback("📖 How to Use", "m:how"), Markup.button.callback("ℹ️ About", "m:about")],
   ]);
 
-// Bulletproof edit function that handles both Text and Photo messages
 async function safeEdit(ctx, text, keyboard = null) {
   const options = { parse_mode: "HTML", ...(keyboard || backMenu()) };
   try {
@@ -281,8 +278,8 @@ bot.action("m:signal", async (ctx) => {
   await safeEdit(ctx, `🔄 <b>Scanning live market and reading news...</b>\n<i>Please wait...</i>`);
   
   try {
-    // CHANGED TO BYBIT TO AVOID US SERVER BLOCK
-    const scanner = new ccxt.bybit();
+    // CHANGED TO KUCOIN
+    const scanner = new ccxt.kucoin();
     const tickers = await scanner.fetchTickers();
     const topMovers = Object.values(tickers).filter(t => t.symbol.endsWith('/USDT')).sort((a, b) => Math.abs(b.percentage) - Math.abs(a.percentage)).slice(0, 5);
     const marketData = topMovers.map(t => `${t.symbol}: $${t.last} (${t.percentage}%)`).join("\n");
