@@ -17,7 +17,7 @@ const MENU_IMAGE_URL = "https://files.catbox.moe/e7j97z.png";
 const DEV_NAME = "Dev Gift";
 const DEV_HANDLE = "@Devgiftt"; 
 const BOT_NAME = "Dev Trading Bot";
-const BOT_VERSION = "2.0.0";
+const BOT_VERSION = "2.1.0";
 
 const bot = new Telegraf(process.env.TG_TOKEN);
 const userSessions = new Map();
@@ -99,7 +99,7 @@ async function getBalance(telegramId) {
 }
 
 // =====================================================================
-// 6. GEMINI AI (UPDATED TO 3.8-FLASH)
+// 6. GEMINI AI (3.8-FLASH)
 // =====================================================================
 async function askGemini(prompt, imageBase64 = null, history = []) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${GEMINI_API_KEY}`;
@@ -146,8 +146,10 @@ async function aiAutoTrade(userId, chatId) {
 }
 
 // =====================================================================
-// 7. STYLED MENUS
+// 7. SAFE EDIT & MENUS
 // =====================================================================
+const backMenu = () => Markup.inlineKeyboard([[Markup.button.callback("⬅️ Main Menu", "m:home")]]);
+
 const mainMenu = () =>
   Markup.inlineKeyboard([
     [Markup.button.callback("🔌 Connect Exchange", "m:connect"), Markup.button.callback("💼 My Balance", "m:balance")],
@@ -155,7 +157,19 @@ const mainMenu = () =>
     [Markup.button.callback("📖 How to Use", "m:how"), Markup.button.callback("ℹ️ About", "m:about")],
   ]);
 
-const backMenu = () => Markup.inlineKeyboard([[Markup.button.callback("⬅️ Main Menu", "m:home")]]);
+// Bulletproof edit function that handles both Text and Photo messages
+async function safeEdit(ctx, text, keyboard = null) {
+  const options = { parse_mode: "HTML", ...(keyboard || backMenu()) };
+  try {
+    if (ctx.update.callback_query.message.photo) {
+      await ctx.editMessageCaption(text, options);
+    } else {
+      await ctx.editMessageText(text, options);
+    }
+  } catch (e) {
+    if (!e.message.includes("message is not modified")) console.error("Edit Error:", e.message);
+  }
+}
 
 // =====================================================================
 // 8. HANDLERS & ROUTING
@@ -163,7 +177,7 @@ const backMenu = () => Markup.inlineKeyboard([[Markup.button.callback("⬅️ Ma
 bot.action("verify_join", async (ctx) => {
   if (await isUserInChannel(ctx.from.id)) {
     await ctx.answerCbQuery("✅ Verified!");
-    await ctx.editMessageText(`🎉 <b>Welcome!</b> You now have full access.`, { parse_mode: "HTML", ...mainMenu() });
+    await safeEdit(ctx, `🎉 <b>Welcome!</b> You now have full access.`, mainMenu());
   } else {
     await ctx.answerCbQuery("❌ Join the channel first!", { show_alert: true });
   }
@@ -175,14 +189,14 @@ bot.start(async (ctx) => {
   const autoStatus = user && user.autoTrade ? `🟢 <b>Auto-Pilot ACTIVE</b>` : `🔴 <b>Auto-Pilot OFF</b>`;
   
   const caption = 
-    `👋 <b>Welcome to ${BOT_NAME} v${BOT_VERSION}</b>\n\n` +
-    `📊 <b>System Status:</b>\n` +
-    `${status}\n` +
-    `${autoStatus}\n\n` +
+    `╭━━━〔 <b>${BOT_NAME}</b> 〕━━━╮\n` +
+    `┃ 📊 <b>Status:</b>\n` +
+    `┃ ${status}\n` +
+    `┃ ${autoStatus}\n` +
+    `╰━━━━━━━━━━━━━━━━━━━━╯\n\n` +
     `💡 <i>I can trade automatically, answer your questions, or analyze MT5/Crypto charts.</i>\n\n` +
-    `👨‍💻 <b>Built by:</b> ${DEV_NAME}`;
+    `👨‍💻 <b>Developer:</b> ${DEV_NAME}`;
 
-  // Sends the image with the beautiful HTML caption and buttons
   await ctx.replyWithPhoto(MENU_IMAGE_URL, {
     caption: caption,
     parse_mode: "HTML",
@@ -190,17 +204,20 @@ bot.start(async (ctx) => {
   });
 });
 
-// When clicking "Main Menu" from other screens, change the text back
 bot.action("m:home", async (ctx) => { 
   await ctx.answerCbQuery(); 
   const user = await User.findOne({ telegramId: String(ctx.from.id) });
   const status = user && user.exchangeName ? `✅ <b>Connected:</b> <code>${user.exchangeName.toUpperCase()}</code>` : `⚠️ <b>Not Connected</b>`;
   const autoStatus = user && user.autoTrade ? `🟢 <b>Auto-Pilot ACTIVE</b>` : `🔴 <b>Auto-Pilot OFF</b>`;
   
-  await ctx.editMessageCaption(
-    `📋 <b>Main Menu</b>\n\n${status}\n${autoStatus}\n\n<i>Select an option below:</i>`, 
-    { parse_mode: "HTML", ...mainMenu() }
-  );
+  const caption = 
+    `╭━━━〔 <b>Main Menu</b> 〕━━━╮\n` +
+    `┃ ${status}\n` +
+    `┃ ${autoStatus}\n` +
+    `╰━━━━━━━━━━━━━━━━━╯\n\n` +
+    `<i>Select an option below:</i>`;
+
+  await safeEdit(ctx, caption, mainMenu());
 });
 
 bot.action("m:how", async (ctx) => {
@@ -211,7 +228,7 @@ bot.action("m:how", async (ctx) => {
     `2️⃣ <b>Auto-Pilot:</b> Turn it ON. The AI will scan the market every 15 minutes and execute trades on its own.\n\n` +
     `3️⃣ <b>Manual:</b> Just type <i>"Buy $20 of SOL"</i>.\n\n` +
     `4️⃣ <b>MT5 Vision:</b> Send a screenshot of your MT5 or TradingView chart for instant analysis.`;
-  await ctx.editMessageText(text, { parse_mode: "HTML", ...backMenu() });
+  await safeEdit(ctx, text);
 });
 
 bot.action("m:about", async (ctx) => {
@@ -222,13 +239,13 @@ bot.action("m:about", async (ctx) => {
     `Powered by CCXT & Google Gemini. Fully autonomous and capable of analyzing MT5 and Crypto charts.\n\n` +
     `👨‍💻 <b>Developer:</b> ${DEV_NAME}\n` +
     `🔗 <b>Contact:</b> ${DEV_HANDLE}`;
-  await ctx.editMessageText(text, { parse_mode: "HTML", ...backMenu() });
+  await safeEdit(ctx, text);
 });
 
 bot.action("m:connect", async (ctx) => {
   await ctx.answerCbQuery();
   userSessions.set(ctx.from.id, { step: "awaiting_exchange" });
-  await ctx.editMessageText(`🔌 <b>Type the name of your exchange:</b>\n<i>(Examples: binance, bybit, kucoin, okx)</i>`, { parse_mode: "HTML", ...backMenu() });
+  await safeEdit(ctx, `🔌 <b>Type the name of your exchange:</b>\n<i>(Examples: binance, bybit, kucoin, okx)</i>`);
 });
 
 bot.action("m:autopilot", async (ctx) => {
@@ -239,10 +256,10 @@ bot.action("m:autopilot", async (ctx) => {
   if (user.autoTrade) {
     user.autoTrade = false; await user.save();
     clearInterval(activeAutoTraders.get(ctx.from.id)); activeAutoTraders.delete(ctx.from.id);
-    await ctx.editMessageText(`🔴 <b>Auto-Pilot DISABLED.</b>`, { parse_mode: "HTML", ...backMenu() });
+    await safeEdit(ctx, `🔴 <b>Auto-Pilot DISABLED.</b>`);
   } else {
     user.autoTrade = true; await user.save();
-    await ctx.editMessageText(`🟢 <b>Auto-Pilot ENABLED.</b>\nI will now trade for you automatically.`, { parse_mode: "HTML", ...backMenu() });
+    await safeEdit(ctx, `🟢 <b>Auto-Pilot ENABLED.</b>\nI will now trade for you automatically.`);
     aiAutoTrade(ctx.from.id, ctx.chat.id);
     activeAutoTraders.set(ctx.from.id, setInterval(() => aiAutoTrade(ctx.from.id, ctx.chat.id), 15 * 60 * 1000));
   }
@@ -250,18 +267,39 @@ bot.action("m:autopilot", async (ctx) => {
 
 bot.action("m:balance", async (ctx) => {
   await ctx.answerCbQuery("Fetching...");
-  try { await ctx.editMessageText(`💵 <b>Balance:</b> $${await getBalance(ctx.from.id)} USDT`, { parse_mode: "HTML", ...backMenu() }); } 
-  catch (e) { await ctx.editMessageText(`❌ <b>Error:</b> ${e.message}`, { parse_mode: "HTML", ...backMenu() }); }
+  try { 
+    const bal = await getBalance(ctx.from.id);
+    await safeEdit(ctx, `💵 <b>Balance:</b> $${bal} USDT`); 
+  } catch (e) { 
+    await safeEdit(ctx, `❌ <b>Error:</b> ${e.message}`); 
+  }
 });
 
 bot.action("m:signal", async (ctx) => {
-  await ctx.answerCbQuery();
-  await ctx.editMessageText(`🔄 <b>Scanning market...</b>`, { parse_mode: "HTML" });
+  await ctx.answerCbQuery("Scanning...");
+  await safeEdit(ctx, `🔄 <b>Scanning live market and reading news...</b>\n<i>Please wait...</i>`);
+  
   try {
-    const res = await askGemini("Scan Binance top movers, read news, and reply JSON: {\"symbol\": \"SOL/USDT\", \"action\": \"BUY\" or \"SELL\", \"reason\": \"Brief\"}");
+    const scanner = new ccxt.binance();
+    const tickers = await scanner.fetchTickers();
+    const topMovers = Object.values(tickers).filter(t => t.symbol.endsWith('/USDT')).sort((a, b) => Math.abs(b.percentage) - Math.abs(a.percentage)).slice(0, 5);
+    const marketData = topMovers.map(t => `${t.symbol}: $${t.last} (${t.percentage}%)`).join("\n");
+    
+    const prompt = `Live Market Data:\n${marketData}\n\nSearch the web for news on these coins. Pick the BEST trade. Reply strictly JSON: {"symbol": "SOL/USDT", "action": "BUY" or "SELL", "reason": "Brief reason"}`;
+    const res = await askGemini(prompt);
     const signal = JSON.parse(res.match(/\{.*\}/s)[0]);
-    await ctx.editMessageText(`🎯 <b>Signal:</b> ${signal.symbol} ${signal.action}\nReason: ${signal.reason}\n\n<i>Reply "Buy $10 of ${signal.symbol.split('/')[0]}" to execute.</i>`, { parse_mode: "HTML", ...backMenu() });
-  } catch (e) { await ctx.editMessageText(`❌ <b>Error:</b> ${e.message}`, backMenu()); }
+    
+    const text = 
+      `🎯 <b>Live AI Signal</b>\n\n` +
+      `🪙 <b>Coin:</b> ${signal.symbol}\n` +
+      `📈 <b>Action:</b> ${signal.action}\n\n` +
+      `📝 <b>Reason:</b> ${signal.reason}\n\n` +
+      `💡 <i>To execute, reply:</i> "Buy $10 of ${signal.symbol.split('/')[0]}"`;
+      
+    await safeEdit(ctx, text);
+  } catch (e) { 
+    await safeEdit(ctx, `❌ <b>Scanner Error:</b> ${e.message}`); 
+  }
 });
 
 // =====================================================================
@@ -297,7 +335,9 @@ bot.on("text", async (ctx) => {
       return ctx.reply(`✅ <b>Trade Executed!</b>\nOrder ID: <code>${result.id}</code>`, { parse_mode: "HTML", ...backMenu() });
     }
     await ctx.reply(res, { parse_mode: "HTML", ...backMenu() });
-  } catch (e) { await ctx.reply(`❌ <b>Error:</b> ${e.message}`, { parse_mode: "HTML", ...backMenu() }); }
+  } catch (e) { 
+    await ctx.reply(`❌ <b>Error:</b> ${e.message}`, { parse_mode: "HTML", ...backMenu() }); 
+  }
 });
 
 // =====================================================================
@@ -313,7 +353,9 @@ bot.on("photo", async (ctx) => {
     const caption = ctx.message.caption || "Analyze this chart. Give me the trend, support, and resistance levels.";
     const analysis = await askGemini(caption, base64);
     await ctx.reply(`📈 <b>Vision Analysis:</b>\n\n${analysis}`, { parse_mode: "HTML", ...backMenu() });
-  } catch (e) { await ctx.reply(`❌ <b>Error:</b> ${e.message}`); }
+  } catch (e) { 
+    await ctx.reply(`❌ <b>Error:</b> ${e.message}`, { parse_mode: "HTML" }); 
+  }
 });
 
 // =====================================================================
