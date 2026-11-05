@@ -8,7 +8,7 @@ import http from "http"; // <-- ADDED FOR SELF-PING
 // =====================================================================
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const MONGO_URI = process.env.MONGO_URI;
-const CHANNEL_ID = "@devxtechzone"; // <--- PUT YOUR CHANNEL USERNAME HERE
+const CHANNEL_ID = "@devxtechzone"; // <--- YOUR CHANNEL
 
 // --- CHANGE YOUR CREDITS HERE ---
 const DEV_NAME = "Dev Gift";
@@ -96,10 +96,12 @@ async function getBalance(telegramId) {
 }
 
 // =====================================================================
-// 6. GEMINI AI (VISION, WEB SEARCH, INTENT)
+// 6. GEMINI AI (UPDATED TO 2.0-FLASH)
 // =====================================================================
 async function askGemini(prompt, imageBase64 = null, history = []) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+  // CHANGED TO gemini-2.0-flash
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
+  
   const parts = [{ text: prompt }];
   if (imageBase64) parts.push({ inlineData: { mimeType: "image/jpeg", data: imageBase64 } });
   const contents = [...history, { role: "user", parts: parts }];
