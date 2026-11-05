@@ -4,9 +4,9 @@ import mongoose from "mongoose";
 import http from "http"; 
 
 // =====================================================================
-// 1. CONFIGURATION & STYLE
+// 1. CONFIGURATION & BRANDING
 // =====================================================================
-const GROK_API_KEY = process.env.GROK_API_KEY; 
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY; 
 const MONGO_URI = process.env.MONGO_URI;
 const CHANNEL_ID = "@devxtechzone"; 
 const MENU_IMAGE_URL = "https://files.catbox.moe/e7j97z.png"; 
@@ -14,7 +14,7 @@ const MENU_IMAGE_URL = "https://files.catbox.moe/e7j97z.png";
 const DEV_NAME = "Dev Gift";
 const DEV_HANDLE = "@Devgiftt"; 
 const BOT_NAME = "Dev Trading Bot";
-const BOT_VERSION = "4.1.0 (Grok Edition)";
+const BOT_VERSION = "12.0.0 (Gemini Live)";
 
 const bot = new Telegraf(process.env.TG_TOKEN);
 const userSessions = new Map();
@@ -102,50 +102,46 @@ async function getBalance(telegramId) {
 }
 
 // =====================================================================
-// 6. GROK AI ENGINE
+// 6. GEMINI AI ENGINE (Text & Vision)
 // =====================================================================
-async function askGrok(prompt) {
-  // If you are using grok-api.com, keep this URL. 
-  // If you are using the official x.ai API, change to https://api.x.ai/v1/chat/completions
-  const url = `https://api.grok-api.com/v1/chat/completions`; 
+async function askGemini(prompt, imageBase64 = null) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${GEMINI_API_KEY}`;
   
+  const parts = [{ text: prompt }];
+  if (imageBase64) parts.push({ inlineData: { mimeType: "image/jpeg", data: imageBase64 } });
+
   const res = await fetch(url, {
     method: "POST",
-    headers: {
-      "Authorization": `Bearer ${GROK_API_KEY}`,
-      "Content-Type": "application/json"
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "grok-beta", 
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.5
+      contents: [{ role: "user", parts: parts }],
+      tools: [{ googleSearch: {} }]
     })
   });
   
   const data = await res.json();
-  if (data.error) throw new Error(data.error.message || "Grok API Error");
-  return data.choices[0].message.content;
+  if (data.error) throw new Error(`Gemini API Error: ${data.error.message}`);
+  if (!data.candidates || !data.candidates[0] || !data.candidates[0].content) throw new Error("Invalid AI response format.");
+  
+  return data.candidates[0].content.parts[0].text;
 }
 
 async function aiAutoTrade(userId, chatId) {
   try {
     const scanner = new ccxt.kucoin();
     const tickers = await scanner.fetchTickers();
-    
-    // Clean, error-free filtering logic
     const topMovers = Object.values(tickers)
       .filter(t => t.symbol.endsWith('/USDT'))
       .sort((a, b) => Math.abs(b.percentage) - Math.abs(a.percentage))
       .slice(0, 5);
-      
     const marketData = topMovers.map(t => `${t.symbol}: $${t.last} (${t.percentage}%)`).join("\n");
     
-    const prompt = `You are an elite crypto trader AI. Look at this live market data:\n${marketData}\n\nPick the BEST trade. Reply strictly in JSON format without markdown formatting: {"decision": "BUY" or "SELL" or "HOLD", "symbol": "SOL/USDT", "reason": "Brief reason"}`;
+    const prompt = `You are an elite crypto trader AI. Look at this live market data:\n${marketData}\n\nSearch the web for the latest news on these specific coins. Pick the BEST trade. Reply strictly in JSON format without markdown formatting: {"decision": "BUY" or "SELL" or "HOLD", "symbol": "SOL/USDT", "reason": "Brief reason"}`;
     
-    const res = await askGrok(prompt);
-    
+    const res = await askGemini(prompt);
     const jsonMatch = res.match(/\{.*\}/s);
     if (!jsonMatch) throw new Error("AI did not return valid JSON.");
+    
     const decisionData = JSON.parse(jsonMatch[0]);
 
     if (decisionData.decision === "BUY" || decisionData.decision === "SELL") {
@@ -174,7 +170,7 @@ async function aiAutoTrade(userId, chatId) {
 }
 
 // =====================================================================
-// 7. SAFE EDIT & MENUS
+// 7. SAFE EDIT & PREMIUM MENUS
 // =====================================================================
 const backMenu = () => Markup.inlineKeyboard([[Markup.button.callback("🔙 Return to Main Menu", "m:home")]]);
 
@@ -204,7 +200,10 @@ async function safeEdit(ctx, text, keyboard = null) {
 bot.action("verify_join", async (ctx) => {
   if (await isUserInChannel(ctx.from.id)) {
     await ctx.answerCbQuery("✅ Verified successfully!");
-    await safeEdit(ctx, `🎉 <b>Access Granted!</b>\n\nWelcome to the elite trading terminal.`, mainMenu());
+    await safeEdit(ctx, 
+      `🎉 <b>ACCESS GRANTED</b>\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `Welcome to the elite trading terminal.`, mainMenu());
   } else {
     await ctx.answerCbQuery("❌ You haven't joined yet!", { show_alert: true });
   }
@@ -243,7 +242,7 @@ bot.action("m:home", async (ctx) => {
     `╭━━━〔 <b>Dashboard</b> 〕━━━╮\n` +
     `┃ ${status}\n` +
     `┃ ${autoStatus}\n` +
-    `╰━━━━━━━━━━━━━━━━━╯\n\n` +
+    `╰━━━━━━━━━━━━━━━━━━━━╯\n\n` +
     `👇 <i>What would you like to do?</i>`;
 
   await safeEdit(ctx, caption, mainMenu());
@@ -252,16 +251,16 @@ bot.action("m:home", async (ctx) => {
 bot.action("m:how", async (ctx) => {
   await ctx.answerCbQuery();
   const text = 
-    `📖 <b>BOT INSTRUCTIONS</b>\n` +
+    `📖 <b>SYSTEM MANUAL</b>\n` +
     `━━━━━━━━━━━━━━━━━━━━\n\n` +
-    `1️⃣ <b>Connect Exchange:</b>\n` +
+    `1️⃣ <b>Exchange Connection:</b>\n` +
     `Click "Connect Exchange" and provide your API Key/Secret. <i>(Ensure "Enable Withdrawals" is UNCHECKED for safety).</i>\n\n` +
     `2️⃣ <b>Auto-Pilot:</b>\n` +
     `Turn it ON. The AI will scan the market every 15 minutes and execute trades on its own.\n\n` +
-    `3️⃣ <b>Manual Trading:</b>\n` +
+    `3️⃣ <b>Manual Execution:</b>\n` +
     `Simply type what you want in the chat!\n` +
     `<i>Example: "Buy $20 of SOL"</i>\n\n` +
-    `4️⃣ <b>Chart Analysis:</b>\n` +
+    `4️⃣ <b>Vision Analysis:</b>\n` +
     `Send a screenshot of your MT5 or TradingView chart for instant technical analysis.`;
   await safeEdit(ctx, text);
 });
@@ -272,7 +271,7 @@ bot.action("m:about", async (ctx) => {
     `👨‍💻 <b>DEVELOPER INFO</b>\n` +
     `━━━━━━━━━━━━━━━━━━━━\n` +
     `This bot was built by <b>${DEV_NAME}</b>.\n\n` +
-    `🚀 <b>Core Engine:</b> CCXT & Grok AI\n` +
+    `🚀 <b>Core Engine:</b> CCXT & Gemini 3.8 Flash\n` +
     `📦 <b>Version:</b> <code>${BOT_VERSION}</code>\n\n` +
     `🔗 <b>Contact Developer:</b> ${DEV_HANDLE}\n\n` +
     `<i>Powered by Dev Trading Systems.</i>`;
@@ -330,14 +329,12 @@ bot.action("m:balance", async (ctx) => {
 
 bot.action("m:signal", async (ctx) => {
   await ctx.answerCbQuery("Scanning...");
-  
   await safeEdit(ctx, `🔄 <b>SCANNING LIVE MARKET</b>\n━━━━━━━━━━━━━━━━━━━━\n<i>📡 Connecting to exchange...</i>`);
   
   try {
     const scanner = new ccxt.kucoin();
     const tickers = await scanner.fetchTickers();
     
-    // Clean, error-free filtering logic
     const topMovers = Object.values(tickers)
       .filter(t => t.symbol.endsWith('/USDT'))
       .sort((a, b) => Math.abs(b.percentage) - Math.abs(a.percentage))
@@ -345,10 +342,10 @@ bot.action("m:signal", async (ctx) => {
       
     const marketData = topMovers.map(t => `${t.symbol}: $${t.last} (${t.percentage}%)`).join("\n");
     
-    await safeEdit(ctx, `🔄 <b>SCANNING LIVE MARKET</b>\n━━━━━━━━━━━━━━━━━━━━\n<i>🧠 AI analyzing price action...</i>`);
+    await safeEdit(ctx, `🔄 <b>SCANNING LIVE MARKET</b>\n━━━━━━━━━━━━━━━━━━━━\n<i>🧠 AI analyzing news & price action...</i>`);
 
-    const prompt = `You are an elite crypto trader AI. Look at this live market data:\n${marketData}\n\nPick the absolute BEST trade. Reply strictly in JSON format without markdown formatting: {"symbol": "SOL/USDT", "action": "BUY" or "SELL", "reason": "Brief reason"}`;
-    const res = await askGrok(prompt);
+    const prompt = `You are an elite crypto trader AI. Look at this live market data:\n${marketData}\n\nSearch the web for news on these coins. Pick the absolute BEST trade. Reply strictly in JSON format without markdown formatting: {"symbol": "SOL/USDT", "action": "BUY" or "SELL", "reason": "Brief reason"}`;
+    const res = await askGemini(prompt);
     
     const jsonMatch = res.match(/\{.*\}/s);
     if (!jsonMatch) throw new Error("AI did not return valid JSON.");
@@ -406,7 +403,7 @@ bot.on("text", async (ctx) => {
 
   await ctx.sendChatAction("typing");
   try {
-    const res = await askGrok(`User says: "${text}". If they want to trade, reply JSON: {"isTrade": true, "action": "BUY" or "SELL", "symbol": "BTC/USDT", "amount": 10}. If not, reply normal text.`);
+    const res = await askGemini(`User says: "${text}". If they want to trade, reply JSON: {"isTrade": true, "action": "BUY" or "SELL", "symbol": "BTC/USDT", "amount": 10}. If not, reply normal text.`);
     
     if (res.includes('"isTrade": true')) {
       const intent = JSON.parse(res.match(/\{.*\}/s)[0]);
@@ -436,10 +433,19 @@ bot.on("text", async (ctx) => {
 // 10. IMAGE VISION
 // =====================================================================
 bot.on("photo", async (ctx) => {
-  await ctx.reply(
-    `📸 <b>VISION MODULE OFFLINE</b>\n` +
-    `━━━━━━━━━━━━━━━━━━━━\n` +
-    `Our current AI engine does not support image processing.`, { parse_mode: "HTML", ...backMenu() });
+  await ctx.sendChatAction("typing");
+  try {
+    const photo = ctx.message.photo[ctx.message.photo.length - 1];
+    const fileLink = await ctx.telegram.getFileLink(photo.file_id);
+    const arrayBuffer = await (await fetch(fileLink.href)).arrayBuffer();
+    const base64 = Buffer.from(arrayBuffer).toString("base64");
+    const caption = ctx.message.caption || "Analyze this chart. Give me the trend, support, and resistance levels.";
+    
+    const analysis = await askGemini(caption, base64);
+    await ctx.reply(`📈 <b>VISION ANALYSIS:</b>\n━━━━━━━━━━━━━━━━━━━━\n${analysis}`, { parse_mode: "HTML", ...backMenu() });
+  } catch (e) { 
+    await ctx.reply(`❌ <b>Error:</b> ${e.message}`, { parse_mode: "HTML" }); 
+  }
 });
 
 // =====================================================================
